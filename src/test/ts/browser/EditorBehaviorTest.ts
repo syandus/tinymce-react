@@ -1,20 +1,20 @@
-import { Assertions, Chain, Logger, Pipeline, GeneralSteps } from '@ephox/agar';
-import { UnitTest } from '@ephox/bedrock-client';
-import { cRemove, cRender, cEditor, cReRender } from '../alien/Loader';
-import { VersionLoader } from '@tinymce/miniature';
 import { PlatformDetection } from '@ephox/sand';
+import * as Loader from '../alien/Loader';
 
+import { describe, it } from '@ephox/bedrock-client';
+
+import { Assertions, Waiter } from '@ephox/agar';
+import { TinyAssertions, TinySelections } from '@ephox/mcagar';
+import { EditorEvent, Events, Editor as TinyMCEEditor } from 'tinymce';
 import { getTinymce } from '../../../main/ts/TinyMCE';
-import { EventStore, VERSIONS, cAssertContent, cSetContent, type Version } from '../alien/TestHelpers';
-import { Editor as TinyMCEEditor, EditorEvent, Events } from 'tinymce';
+import { EventStore, VERSIONS } from '../alien/TestHelpers';
 
 type SetContentEvent = EditorEvent<Events.EditorEventMap['SetContent']>;
 
-UnitTest.asynctest('EditorBehaviorTest', (success, failure) => {
+describe('EditorBehaviourTest', () => {
   const browser = PlatformDetection.detect().browser;
   if (browser.isIE()) {
     // INT-2278: This test currently times out in IE so we are skipping it
-    success();
     return;
   }
   const versionRegex = /6|7/;
@@ -29,18 +29,17 @@ UnitTest.asynctest('EditorBehaviorTest', (success, failure) => {
 
   const eventStore = EventStore();
 
-  const sTestVersion = (version: Version) => VersionLoader.sWithVersion(
-    version,
-    GeneralSteps.sequence([
-      Logger.t('Assert structure of tinymce and tinymce-react events', Chain.asStep({}, [
-        cRender({
+  VERSIONS.forEach((version) =>
+    Loader.withVersion(version, (render) => {
+      it('Assert structure of tinymce and tinymce-react events', async () => {
+        using ctx = await render({
           onEditorChange: eventStore.createHandler('onEditorChange'),
-          onSetContent: eventStore.createHandler('onSetContent')
-        }),
+          onSetContent: eventStore.createHandler('onSetContent'),
+        });
 
         // tinymce native event
         // initial content is empty as editor does not have a value or initialValue
-        eventStore.cEach<SetContentEvent>('onSetContent', (events) => {
+        eventStore.each<SetContentEvent>('onSetContent', (events) => {
           // note that this difference in behavior in 5-6 may be a bug, the team is investigating
           Assertions.assertEq(
             'First arg should be event from Tiny',
@@ -48,87 +47,111 @@ UnitTest.asynctest('EditorBehaviorTest', (success, failure) => {
             events[0].editorEvent.content
           );
           Assertions.assertEq('Second arg should be editor', true, isEditor(events[0].editor));
-        }),
+        });
+        eventStore.clearState();
 
-        eventStore.cClearState,
-
-        cEditor(cSetContent('<p>Initial Content</p>')),
-
+        ctx.editor.setContent('<p>Initial Content</p>');
         // tinymce native event
-        eventStore.cEach<SetContentEvent>('onSetContent', (events) => {
+        eventStore.each<SetContentEvent>('onSetContent', (events) => {
           Assertions.assertEq('onSetContent should have been fired once', 1, events.length);
-          Assertions.assertEq('First arg should be event from Tiny', '<p>Initial Content</p>', events[0].editorEvent.content);
+          Assertions.assertEq(
+            'First arg should be event from Tiny',
+            '<p>Initial Content</p>',
+            events[0].editorEvent.content
+          );
           Assertions.assertEq('Second arg should be editor', true, isEditor(events[0].editor));
-        }),
+        });
 
         // tinymce-react unique event
-        eventStore.cEach<string>('onEditorChange', (events) => {
+        eventStore.each<string>('onEditorChange', (events) => {
           Assertions.assertEq('First arg should be new content', '<p>Initial Content</p>', events[0].editorEvent);
           Assertions.assertEq('Second arg should be editor', true, isEditor(events[0].editor));
-        }),
+        });
+        eventStore.clearState();
+      });
 
-        eventStore.cClearState,
-        cRemove
-      ])),
+      it('onEditorChange should only fire when the editors content changes', async () => {
+        using ctx = await render({
+          onEditorChange: eventStore.createHandler('onEditorChange'),
+        });
 
-      Logger.t('onEditorChange should only fire when the editors content changes', Chain.asStep({}, [
-        cRender({
-          onEditorChange: eventStore.createHandler('onEditorChange')
-        }),
+        ctx.editor.setContent('<p>Initial Content</p>');
+        ctx.editor.setContent('<p>Initial Content</p>'); // Repeat
 
-        cEditor(cSetContent('<p>Initial Content</p>')),
-        cEditor(cSetContent('<p>Initial Content</p>')), // Repeat
-
-        eventStore.cEach('onEditorChange', (events) => {
+        eventStore.each('onEditorChange', (events) => {
           Assertions.assertEq('onEditorChange should have been fired once', 1, events.length);
-        }),
+        });
+        eventStore.clearState();
+      });
 
-        eventStore.cClearState,
-        cRemove
-      ])),
+      it('Should be able to register an event handler after initial render', async () => {
+        using ctx = await render({ initialValue: '<p>Initial Content</p>' });
+        await ctx.reRender({ onSetContent: eventStore.createHandler('onSetContent') });
 
-      Logger.t('Should be able to register an event handler after initial render', Chain.asStep({}, [
-        cRender({ initialValue: '<p>Initial Content</p>' }),
-        cReRender({ onSetContent: eventStore.createHandler('onSetContent') }),
+        TinyAssertions.assertContent(ctx.editor, '<p>Initial Content</p>');
+        await Waiter.pWait(0); // Wait for React's state updates to complete before setting new content
+        ctx.editor.setContent('<p>New Content</p>');
 
-        cEditor(cAssertContent('<p>Initial Content</p>')),
-        cEditor(cSetContent('<p>New Content</p>')),
+        eventStore.each<SetContentEvent>('onSetContent', (events) => {
+          Assertions.assertEq(
+            'Should have bound handler, hence new content',
+            '<p>New Content</p>',
+            events[0].editorEvent.content
+          );
+        });
+        eventStore.clearState();
+      });
 
-        eventStore.cEach<SetContentEvent>('onSetContent', (events) => {
-          Assertions.assertEq('Should have bound handler, hence new content', '<p>New Content</p>', events[0].editorEvent.content);
-        }),
-
-        eventStore.cClearState,
-        cRemove
-      ])),
-
-      Logger.t('Providing a new event handler and re-rendering should unbind old handler and bind new handler', Chain.asStep({}, [
-        cRender({ onSetContent: eventStore.createHandler('InitialHandler') }),
-        eventStore.cEach<SetContentEvent>('InitialHandler', (events) => {
+      it('Providing a new event handler and re-rendering should unbind old handler and bind new handler', async () => {
+        using ctx = await render({ onSetContent: eventStore.createHandler('InitialHandler') });
+        eventStore.each<SetContentEvent>('InitialHandler', (events) => {
           Assertions.assertEq(
             'Initial content is empty as editor does not have a value or initialValue',
             // note that this difference in behavior in 5-6 may be a bug, the team is investigating
             versionRegex.test(version) ? '<p><br data-mce-bogus="1"></p>' : '',
-            events[0].editorEvent.content);
-        }),
-        eventStore.cClearState,
-        cEditor(cSetContent('<p>Initial Content</p>')),
+            events[0].editorEvent.content
+          );
+        });
+        eventStore.clearState();
+        ctx.editor.setContent('<p>Initial Content</p>');
+        await ctx.reRender({ onSetContent: eventStore.createHandler('NewHandler') });
+        await Waiter.pWait(0); // Wait for React's state updates to complete before setting new content
+        ctx.editor.setContent('<p>New Content</p>');
 
-        cReRender({ onSetContent: eventStore.createHandler('NewHandler') }),
-        cEditor(cSetContent('<p>New Content</p>')),
+        eventStore.each<SetContentEvent>('InitialHandler', (events) => {
+          Assertions.assertEq(
+            'Initial handler should have been unbound, hence initial content',
+            '<p>Initial Content</p>',
+            events[0].editorEvent.content
+          );
+        });
+        eventStore.each<SetContentEvent>('NewHandler', (events) => {
+          Assertions.assertEq(
+            'New handler should have been bound, hence new content',
+            '<p>New Content</p>',
+            events[0].editorEvent.content
+          );
+        });
 
-        eventStore.cEach<SetContentEvent>('InitialHandler', (events) => {
-          Assertions.assertEq('Initial handler should have been unbound, hence initial content', '<p>Initial Content</p>', events[0].editorEvent.content);
-        }),
-        eventStore.cEach<SetContentEvent>('NewHandler', (events) => {
-          Assertions.assertEq('New handler should have been bound, hence new content', '<p>New Content</p>', events[0].editorEvent.content);
-        }),
-
-        eventStore.cClearState,
-        cRemove
-      ])),
-    ])
+        eventStore.clearState();
+      });
+      it('INT-3226: onEditorChange is triggered only once after calling insertContent', async () => {
+        using ctx = await render({ onEditorChange: eventStore.createHandler('onEditorChange') });
+        const { editor } = ctx;
+        editor.setContent('<p>abc</p>');
+        await Waiter.pTryUntilPredicate('Editor content is set to correct value', () => ctx.editor.getContent() === '<p>abc</p>');
+        eventStore.clearState();
+        TinySelections.setSelection(editor, [ 0, 0 ], 1, [ 0, 0 ], 2);
+        editor.insertContent('e');
+        await Waiter.pTryUntilPredicate('Editor content is set to correct value', () => ctx.editor.getContent() === '<p>aec</p>');
+        eventStore.each<string>('onEditorChange', (events) => {
+          Assertions.assertEq(
+            'onEditorChange should have been triggered once',
+            1,
+            events.length
+          );
+        });
+      });
+    })
   );
-
-  Pipeline.async({}, VERSIONS.map(sTestVersion), success, failure);
 });

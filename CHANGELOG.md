@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Added
+- Support for `react` version `^19.0.0` by updating the `react` and `react-dom` in the `peerDependencies` to `^19.0.0`
+
+### Fixed
+- The `onEditorChange` callback was called three times when content was inserted with `insertContent` editor API. #INT-3226
+
+## 6.0.0 - 2025-02-21
+
+### Fixed
+- Updated dependencies. #INT-3324
+
+### Changed
+- Moved tinymce dependency to peerDependencies, as well as making it optional. #INT-3324
+
+## 5.1.0 - 2024-06-11
+
+### Added
 - Added `tabIndex` prop. Community PR acknowledgement: Grand Julivan <grandjulivan@gmail.com>
 
 ## 5.0.0 - 2024-03-27
