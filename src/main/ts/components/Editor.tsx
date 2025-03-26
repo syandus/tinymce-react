@@ -304,7 +304,7 @@ export class Editor extends React.Component<IAllProps> {
       });
     }
     // fallback to the cloud when the tinymceScriptSrc is not specified
-    const cloudTinyJs = `https://cdn.alivesim.com/tinymce/1/tinymce.min.js`;
+    const cloudTinyJs = `https://cdn.alivesim.com/tinymce/4/tinymce.min.js`;
     return [{ src: cloudTinyJs, async, defer }];
   }
 
